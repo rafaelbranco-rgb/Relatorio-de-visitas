@@ -109,11 +109,11 @@ function fmtData(iso) {
 
 function montaMsg(c) {
   return (
-    '*Confirmação de Envio — Relatório de Visitas*\n\n' +
+    '*Mensagem de Confirmação de Envio (Relatório de Visitas)*\n\n' +
     `*ENCARREGADO RESPONSÁVEL:* ${c.name || '—'}\n` +
     `*CONTRATO:* ${c.contrato || '—'}\n` +
     `*UNIDADE:* ${c.unidade || '—'}\n` +
-    `*OBJETO DA VISITA:* ${c.objetivo || '—'}\n` +
+    `*OBJETIVO:* ${c.objetivo || '—'}\n` +
     `*DATA DE REALIZAÇÃO:* ${fmtData(c.data)}`
   );
 }

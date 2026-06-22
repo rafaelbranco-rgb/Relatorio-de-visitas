@@ -47,11 +47,11 @@ def _fmt_data(iso: str | None) -> str:
 
 def _montar_mensagem(ctx: dict) -> str:
     return (
-        "*Confirmação de Envio — Relatório de Visitas*\n\n"
+        "*Mensagem de Confirmação de Envio (Relatório de Visitas)*\n\n"
         f"*ENCARREGADO RESPONSÁVEL:* {ctx.get('name') or '—'}\n"
         f"*CONTRATO:* {ctx.get('contrato') or '—'}\n"
         f"*UNIDADE:* {ctx.get('unidade') or '—'}\n"
-        f"*OBJETO DA VISITA:* {ctx.get('objetivo') or '—'}\n"
+        f"*OBJETIVO:* {ctx.get('objetivo') or '—'}\n"
         f"*DATA DE REALIZAÇÃO:* {_fmt_data(ctx.get('data_realizacao'))}"
     )
 
