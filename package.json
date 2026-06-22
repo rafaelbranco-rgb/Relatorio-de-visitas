@@ -1,0 +1,10 @@
+{
+  "name": "confirmacao-visitas",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "description": "Confirmação de envio de relatório de visitas (Monday -> Evolution API)",
+  "dependencies": {
+    "@vercel/functions": "^3.7.2"
+  }
+}
