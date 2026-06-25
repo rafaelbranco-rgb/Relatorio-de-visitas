@@ -1,7 +1,11 @@
 // Webhook do monday.com -> Evolution API (confirmação de visita).
 //
-// Responde 200 IMEDIATAMENTE pro Monday (evita timeout/retry => sem duplicata)
-// e processa a leitura do item + envio no WhatsApp em background via waitUntil.
+// Fonte: board "Relatório de Visitas" (OPERAÇÕES). Dispara a CADA novo relatório
+// criado. Responde 200 IMEDIATAMENTE pro Monday (evita timeout/retry => sem
+// duplicata) e processa a leitura do item + envio no WhatsApp em background.
+//
+// Teste seguro: POST com ?dryRun=1 processa e RETORNA a mensagem montada SEM
+// enviar no WhatsApp (não polui o grupo).
 import { waitUntil } from '@vercel/functions';
 
 const MONDAY_TOKEN = (process.env.MONDAY_API_TOKEN || '').trim();
@@ -14,11 +18,14 @@ const GRUPOS = {
   seduc: (process.env.GRUPO_SEDUC || '120363409142232952@g.us').trim(),
 };
 
+// Colunas casadas por TÍTULO (resiliente a mudança de id). No board novo:
+// Contrato, Unidade, Objetivo da Visita, Data de Visita, Responsável pela Visita.
 const COL_TITLES = {
   contrato: ['contrato'],
   unidade: ['unidade'],
-  objetivo: ['objeto da visita', 'objetivo', 'objeto'],
-  data: ['data de realiza', 'data'],
+  objetivo: ['objetivo', 'objeto'],
+  data: ['data de visita', 'data de realiza', 'data'],
+  responsavel: ['respons'], // "Responsável pela Visita"
 };
 
 const norm = (s) => (s || '').trim().toLowerCase();
@@ -63,19 +70,31 @@ async function getItem(id) {
     unidade: txt(COL_TITLES.unidade),
     objetivo: txt(COL_TITLES.objetivo),
     data: txt(COL_TITLES.data),
+    responsavel: txt(COL_TITLES.responsavel),
   };
 }
 
 function fmtData(iso) {
   if (!iso) return '—';
-  const p = iso.split('-');
+  // O board novo manda "2026-04-27 09:00" (com hora); pega só a parte da data.
+  const datePart = String(iso).split(' ')[0].split('T')[0];
+  const p = datePart.split('-');
   return p.length === 3 && p[0].length === 4 ? `${p[2]}/${p[1]}/${p[0]}` : iso;
+}
+
+// Mapeia o contrato para o grupo: SEMSA -> grupo SEMSA; qualquer SEDUC
+// (SEDUC SEDE / SEDUC ESCOLA) -> grupo SEDUC. Outros (DETRAN/CETAM/TRE PB) = ignora.
+function grupoDoContrato(contrato) {
+  const c = norm(contrato);
+  if (c.startsWith('semsa')) return GRUPOS.semsa;
+  if (c.startsWith('seduc')) return GRUPOS.seduc;
+  return null;
 }
 
 function montaMsg(c) {
   return (
     '*Mensagem de Confirmação de Envio (Relatório de Visitas)*\n\n' +
-    `*ENCARREGADO RESPONSÁVEL:* ${c.name || '—'}\n` +
+    `*ENCARREGADO RESPONSÁVEL:* ${c.responsavel || c.name || '—'}\n` +
     `*CONTRATO:* ${c.contrato || '—'}\n` +
     `*UNIDADE:* ${c.unidade || '—'}\n` +
     `*OBJETIVO:* ${c.objetivo || '—'}\n` +
@@ -93,13 +112,25 @@ async function sendText(jid, text) {
   return r.json().catch(() => ({}));
 }
 
-async function processar(itemId) {
+async function processar(itemId, dryRun = false) {
   const item = await getItem(itemId);
-  if (!item) return console.log('item não encontrado', itemId);
-  const jid = GRUPOS[norm(item.contrato)];
-  if (!jid) return console.log('ignorado', itemId, '| contrato:', item.contrato || '(vazio)');
-  await sendText(jid, montaMsg(item));
-  console.log('ENVIADO', itemId, '|', item.contrato, '|', item.name);
+  if (!item) {
+    console.log('item não encontrado', itemId);
+    return { ok: false, reason: 'item-nao-encontrado' };
+  }
+  const jid = grupoDoContrato(item.contrato);
+  if (!jid) {
+    console.log('ignorado', itemId, '| contrato:', item.contrato || '(vazio)');
+    return { ok: true, ignored: true, contrato: item.contrato || null };
+  }
+  const msg = montaMsg(item);
+  if (dryRun) {
+    console.log('DRYRUN', itemId, '->', jid);
+    return { ok: true, dryRun: true, jid, contrato: item.contrato, msg };
+  }
+  await sendText(jid, msg);
+  console.log('ENVIADO', itemId, '|', item.contrato, '|', item.responsavel || item.name);
+  return { ok: true, sent: true, jid };
 }
 
 export default async function handler(req, res) {
@@ -120,7 +151,17 @@ export default async function handler(req, res) {
   const itemId = event.pulseId || event.itemId;
   if (!itemId) return res.status(200).json({ ok: true, ignored: 'sem pulseId' });
 
-  // 3) ACK imediato + processa em background (sem segurar a resposta).
+  // 3) Modo de teste: processa e devolve o resultado SEM enviar.
+  if (req.query.dryRun) {
+    try {
+      const result = await processar(itemId, true);
+      return res.status(200).json(result);
+    } catch (e) {
+      return res.status(200).json({ ok: false, error: e.message });
+    }
+  }
+
+  // 4) ACK imediato + processa em background (sem segurar a resposta).
   waitUntil(processar(itemId).catch((e) => console.error('FALHA proc', itemId, ':', e.message)));
   return res.status(200).json({ ok: true, queued: String(itemId) });
 }
